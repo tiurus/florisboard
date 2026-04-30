@@ -17,6 +17,7 @@
 package dev.patrickgold.florisboard.ime.nlp.latin
 
 import android.content.Context
+import dev.patrickgold.florisboard.app.FlorisPreferenceStore
 import dev.patrickgold.florisboard.appContext
 import dev.patrickgold.florisboard.ime.core.Subtype
 import dev.patrickgold.florisboard.ime.editor.EditorContent
@@ -24,6 +25,7 @@ import dev.patrickgold.florisboard.ime.nlp.SpellingProvider
 import dev.patrickgold.florisboard.ime.nlp.SpellingResult
 import dev.patrickgold.florisboard.ime.nlp.SuggestionCandidate
 import dev.patrickgold.florisboard.ime.nlp.SuggestionProvider
+import dev.patrickgold.florisboard.ime.nlp.WordSuggestionCandidate
 import dev.patrickgold.florisboard.lib.devtools.flogDebug
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -31,7 +33,9 @@ import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import org.florisboard.lib.android.readText
-import org.florisboard.lib.kotlin.guardedByLock
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.min
 
 class LatinLanguageProvider(context: Context) : SpellingProvider, SuggestionProvider {
     companion object {
@@ -41,9 +45,13 @@ class LatinLanguageProvider(context: Context) : SpellingProvider, SuggestionProv
     }
 
     private val appContext by context.appContext()
+    private val prefs by FlorisPreferenceStore
 
-    private val wordData = guardedByLock { mutableMapOf<String, Int>() }
+    private val dataLock = Any()
+    @Volatile private var wordData: Map<String, Int> = emptyMap()
+    @Volatile private var wordIndex: Map<String, List<String>> = emptyMap()
     private val wordDataSerializer = MapSerializer(String.serializer(), Int.serializer())
+    @Volatile private var activeDictionaryKey: String? = null
 
     override val providerId = ProviderId
 
@@ -68,13 +76,21 @@ class LatinLanguageProvider(context: Context) : SpellingProvider, SuggestionProv
         // The subtype we get here contains a lot of data, however we are only interested in subtype.primaryLocale and
         // subtype.secondaryLocales.
 
-        wordData.withLock { wordData ->
-            if (wordData.isEmpty()) {
-                // Here we use readText() because the test dictionary is a json dictionary
-                val rawData = appContext.assets.readText("ime/dict/data.json")
-                val jsonData = Json.decodeFromString(wordDataSerializer, rawData)
-                wordData.putAll(jsonData)
+        val dictKey = subtype.primaryLocale.language.ifBlank { "en" }
+        if (activeDictionaryKey == dictKey && wordData.isNotEmpty()) {
+            return@withContext
+        }
+        val rawData = loadDictionaryText(dictKey)
+        synchronized(dataLock) {
+            activeDictionaryKey = dictKey
+            if (rawData.isNullOrBlank()) {
+                wordData = emptyMap()
+                wordIndex = emptyMap()
+                return@withContext
             }
+            val jsonData = Json.decodeFromString(wordDataSerializer, rawData)
+            wordData = jsonData
+            wordIndex = buildWordIndex(jsonData)
         }
     }
 
@@ -87,15 +103,23 @@ class LatinLanguageProvider(context: Context) : SpellingProvider, SuggestionProv
         allowPossiblyOffensive: Boolean,
         isPrivateSession: Boolean,
     ): SpellingResult {
-        return when (word.lowercase()) {
-            // Use typo for typing errors
-            "typo" -> SpellingResult.typo(arrayOf("typo1", "typo2", "typo3"))
-            // Use grammar error if the algorithm can detect this. On Android 11 and lower grammar errors are visually
-            // marked as typos due to a lack of support
-            "gerror" -> SpellingResult.grammarError(arrayOf("grammar1", "grammar2", "grammar3"))
-            // Use valid word for valid input
-            else -> SpellingResult.validWord()
+        val locale = subtype.primaryLocale.base
+        val normalized = word.lowercase(locale)
+        val wordDataSnapshot = wordData
+        if (wordDataSnapshot.isEmpty()) {
+            return SpellingResult.unspecified()
         }
+        if (wordDataSnapshot.containsKey(normalized)) {
+            return SpellingResult.validWord()
+        }
+        val suggestions = buildSuggestions(
+            input = word,
+            normalized = normalized,
+            locale = locale,
+            maxCandidateCount = maxSuggestionCount,
+            allowAutoCommit = false,
+        )
+        return SpellingResult.typo(suggestions.map { it.text.toString() }.toTypedArray())
     }
 
     override suspend fun suggest(
@@ -105,21 +129,22 @@ class LatinLanguageProvider(context: Context) : SpellingProvider, SuggestionProv
         allowPossiblyOffensive: Boolean,
         isPrivateSession: Boolean,
     ): List<SuggestionCandidate> {
-        return emptyList()
-        /*val word = content.composingText.ifBlank { "next" }
-        val suggestions = buildList {
-            for (n in 0 until maxCandidateCount) {
-                add(WordSuggestionCandidate(
-                    text = "$word$n",
-                    secondaryText = if (n % 2 == 1) "secondary" else null,
-                    confidence = 0.5,
-                    isEligibleForAutoCommit = false,//n == 0 && word.startsWith("auto"),
-                    // We set ourselves as the source provider so we can get notify events for our candidate
-                    sourceProvider = this@LatinLanguageProvider,
-                ))
-            }
+        val locale = subtype.primaryLocale.base
+        val input = content.composingText.ifBlank { content.currentWordText }
+        if (input.isBlank()) {
+            return emptyList()
         }
-        return suggestions*/
+        val normalized = input.lowercase(locale)
+        if (wordData.isEmpty()) {
+            return emptyList()
+        }
+        return buildSuggestions(
+            input = input,
+            normalized = normalized,
+            locale = locale,
+            maxCandidateCount = maxCandidateCount,
+            allowAutoCommit = prefs.correction.autoCorrectEnabled.get(),
+        )
     }
 
     override suspend fun notifySuggestionAccepted(subtype: Subtype, candidate: SuggestionCandidate) {
@@ -137,15 +162,149 @@ class LatinLanguageProvider(context: Context) : SpellingProvider, SuggestionProv
     }
 
     override suspend fun getListOfWords(subtype: Subtype): List<String> {
-        return wordData.withLock { it.keys.toList() }
+        return wordData.keys.toList()
     }
 
     override suspend fun getFrequencyForWord(subtype: Subtype, word: String): Double {
-        return wordData.withLock { it.getOrDefault(word, 0) / 255.0 }
+        return wordData.getOrDefault(word, 0) / 255.0
     }
 
     override suspend fun destroy() {
         // Here we have the chance to de-allocate memory and finish our work. However this might never be called if
         // the app process is killed (which will most likely always be the case).
+    }
+
+    private fun loadDictionaryText(languageKey: String): String? {
+        val exactPath = "ime/dict/$languageKey.json"
+        val fallbackPath = "ime/dict/data.json"
+        return runCatching { appContext.assets.readText(exactPath) }
+            .recoverCatching {
+                if (languageKey == "en") {
+                    appContext.assets.readText(fallbackPath)
+                } else {
+                    null
+                }
+            }
+            .getOrNull()
+    }
+
+    private fun buildWordIndex(data: Map<String, Int>): Map<String, List<String>> {
+        val index = mutableMapOf<String, MutableList<String>>()
+        for (word in data.keys) {
+            val key = word.take(min(2, word.length))
+            index.getOrPut(key) { mutableListOf() }.add(word)
+        }
+        for (list in index.values) {
+            list.sortByDescending { data[it] ?: 0 }
+        }
+        return index
+    }
+
+    private fun buildSuggestions(
+        input: String,
+        normalized: String,
+        locale: Locale,
+        maxCandidateCount: Int,
+        allowAutoCommit: Boolean,
+    ): List<WordSuggestionCandidate> {
+        val prefixKey = normalized.take(min(2, normalized.length))
+        val index = wordIndex
+        val wordDataSnapshot = wordData
+        val prefixCandidates = index[prefixKey].orEmpty().ifEmpty {
+            if (prefixKey.length > 1) index[normalized.take(1)].orEmpty() else emptyList()
+        }
+        val exactMatchExists = wordDataSnapshot.containsKey(normalized)
+        val prefixMatches = prefixCandidates.filter { it.startsWith(normalized) }
+        val sortedPrefixMatches = prefixMatches.sortedByDescending { wordDataSnapshot[it] ?: 0 }
+        val results = sortedPrefixMatches.take(maxCandidateCount).toMutableList()
+
+        var autoCommitWord: String? = null
+        if (!exactMatchExists && normalized.length >= 3) {
+            val maxDistance = if (normalized.length >= 6) 2 else 1
+            autoCommitWord = findBestFuzzyMatch(normalized, prefixCandidates, maxDistance, wordDataSnapshot)
+            if (autoCommitWord != null && autoCommitWord !in results) {
+                results.add(0, autoCommitWord)
+            }
+        }
+
+        return results.distinct().take(maxCandidateCount).mapIndexed { indexInList, candidate ->
+            WordSuggestionCandidate(
+                text = applyInputCase(input, candidate, locale),
+                confidence = (wordDataSnapshot[candidate] ?: 0) / 255.0,
+                isEligibleForAutoCommit = allowAutoCommit && candidate == autoCommitWord && indexInList == 0,
+                sourceProvider = this,
+            )
+        }
+    }
+
+    private fun findBestFuzzyMatch(
+        input: String,
+        candidates: List<String>,
+        maxDistance: Int,
+        wordDataSnapshot: Map<String, Int>,
+    ): String? {
+        var bestWord: String? = null
+        var bestDistance = maxDistance + 1
+        var bestFrequency = -1
+        for (candidate in candidates) {
+            if (abs(candidate.length - input.length) > maxDistance) {
+                continue
+            }
+            val distance = editDistanceWithin(input, candidate, maxDistance) ?: continue
+            val frequency = wordDataSnapshot[candidate] ?: 0
+            if (distance < bestDistance || (distance == bestDistance && frequency > bestFrequency)) {
+                bestDistance = distance
+                bestFrequency = frequency
+                bestWord = candidate
+            }
+        }
+        return bestWord
+    }
+
+    private fun editDistanceWithin(input: String, candidate: String, maxDistance: Int): Int? {
+        if (abs(input.length - candidate.length) > maxDistance) {
+            return null
+        }
+        var prev = IntArray(candidate.length + 1) { it }
+        var curr = IntArray(candidate.length + 1)
+        for (i in 1..input.length) {
+            curr[0] = i
+            var minInRow = curr[0]
+            for (j in 1..candidate.length) {
+                val cost = if (input[i - 1] == candidate[j - 1]) 0 else 1
+                val value = minOf(
+                    prev[j] + 1,
+                    curr[j - 1] + 1,
+                    prev[j - 1] + cost,
+                )
+                curr[j] = value
+                if (value < minInRow) {
+                    minInRow = value
+                }
+            }
+            if (minInRow > maxDistance) {
+                return null
+            }
+            val swap = prev
+            prev = curr
+            curr = swap
+        }
+        val result = prev[candidate.length]
+        return if (result <= maxDistance) result else null
+    }
+
+    private fun applyInputCase(input: String, suggestion: String, locale: Locale): String {
+        return when {
+            input.isEmpty() -> suggestion
+            input.all { it.isUpperCase() } -> suggestion.uppercase(locale)
+            input.first().isUpperCase() -> suggestion.replaceFirstChar { char ->
+                if (char.isLowerCase()) {
+                    char.titlecase(locale)
+                } else {
+                    char.toString()
+                }
+            }
+            else -> suggestion
+        }
     }
 }

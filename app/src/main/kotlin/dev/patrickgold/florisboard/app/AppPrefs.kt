@@ -158,6 +158,10 @@ abstract class FlorisPreferenceModel : PreferenceModel() {
 
     val correction = Correction()
     inner class Correction {
+        val autoCorrectEnabled = boolean(
+            key = "correction__auto_correct_enabled",
+            default = true,
+        )
         val autoCapitalization = boolean(
             key = "correction__auto_capitalization",
             default = true,

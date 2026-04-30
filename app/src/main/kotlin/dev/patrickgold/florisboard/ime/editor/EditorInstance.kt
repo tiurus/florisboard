@@ -256,6 +256,9 @@ class EditorInstance(context: Context) : AbstractEditorInstance(context) {
         return if (content.composing.isValid) {
             phantomSpace.setActive(showComposingRegion = false, candidate = candidate)
             super.finalizeComposingText(text)
+        } else if (content.currentWord.isValid) {
+            phantomSpace.setActive(showComposingRegion = false, candidate = candidate)
+            super.finalizeCurrentWordText(text)
         } else {
             val isPhantomSpaceActive = phantomSpace.determine(text)
             phantomSpace.setActive(showComposingRegion = false, candidate = candidate)

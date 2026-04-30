@@ -441,6 +441,8 @@
     <string name="pref__suggestion__api30_inline_suggestions_enabled__summary" comment="Preference summary">Показывать встроенные предложения, предоставляемые службами автозаполнения</string>
     <string name="pref__suggestion__incognito_mode__label" comment="Label of Incognito mode preference in Typing">Режим инкогнито</string>
     <string name="pref__correction__title" comment="Preference group title">Исправления</string>
+    <string name="pref__correction__auto_correct__label" comment="Preference title">Автоисправление</string>
+    <string name="pref__correction__auto_correct__summary" comment="Preference summary">Автоматически исправлять частые опечатки</string>
     <string name="pref__correction__auto_capitalization__label" comment="Preference title">Заглавные автоматически</string>
     <string name="pref__correction__auto_capitalization__summary" comment="Preference summary">Использовать заглавные буквы в зависимости от текущего контекста ввода</string>
     <string name="pref__correction__auto_space_punctuation__label" comment="Preference title">Пробел после знаков препинания</string>
@@ -449,6 +451,9 @@
     <string name="pref__correction__remember_caps_lock_state__summary" comment="Preference summary">Caps Lock будет оставаться при переходе на другое текстовое поле</string>
     <string name="pref__correction__double_space_period__label" comment="Preference title">Замена двойного пробела</string>
     <string name="pref__correction__double_space_period__summary" comment="Preference summary">При двойном нажатии на пробел вставляется точка, за которой следует пробел</string>
+
+    <string name="autocorrect__toast_after_enabled">Автоисправление включено</string>
+    <string name="autocorrect__toast_after_disabled">Автоисправление выключено</string>
     <string name="pref__spelling__title" comment="Preference group title">Орфография</string>
     <string name="pref__spelling__active_spellchecker__summary_disabled">Отключено для всей системы. В случае написания слов неправильно в текстовых полях не появятся красные подчёркивания. Нажмите, чтобы изменить.</string>
     <string name="pref__spelling__active_spellchecker__summary_none">Не настроена служба проверки орфографии текстовых полей. Нажмите, чтобы изменить.</string>

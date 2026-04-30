@@ -1,0 +1,13 @@
+{
+  "uniqueId": "frequencywords",
+  "name": "FrequencyWords (OpenSubtitles word frequency data)",
+  "developers": [
+    {
+      "name": "Hermit Dave"
+    }
+  ],
+  "website": "https://github.com/hermitdave/FrequencyWords",
+  "licenses": [
+    "cc-by-sa-4.0"
+  ]
+}

@@ -291,7 +291,7 @@ abstract class AbstractEditorInstance(context: Context) {
     abstract fun determineComposer(composerName: ExtensionComponentName): Composer
 
     protected open fun shouldDetermineComposingRegion(editorInfo: FlorisEditorInfo): Boolean {
-        return editorInfo.isRichInputEditor && !editorInfo.inputAttributes.flagTextNoSuggestions
+        return editorInfo.isRichInputEditor
     }
 
     private suspend fun determineLocalComposing(
@@ -430,6 +430,34 @@ abstract class AbstractEditorInstance(context: Context) {
                 selectedText = "",
             )
             expectedContentQueue.push(newContent)
+            ic.setComposingText(text, 1)
+            ic.finishComposingText()
+            _lastCommitPosition.handleCommit(newContent.selection)
+        }
+        ic.endBatchEdit()
+        return true
+    }
+
+    open fun finalizeCurrentWordText(text: String): Boolean {
+        val ic = currentInputConnection() ?: return false
+        val content = activeContent
+        val currentWord = content.currentWord
+        ic.beginBatchEdit()
+        if (activeInfo.isRawInputEditor || currentWord.isNotValid || content.selection.start != currentWord.end) {
+            ic.endBatchEdit()
+            return false
+        } else runBlocking {
+            val newSelection = EditorRange.cursor(currentWord.start + text.length)
+            val newContent = content.generateCopy(
+                selection = newSelection,
+                textBeforeSelection = buildString {
+                    append(content.textBeforeSelection.removeSuffix(content.currentWordText))
+                    append(text)
+                },
+                selectedText = "",
+            )
+            expectedContentQueue.push(newContent)
+            ic.setComposingRegion(currentWord.start, currentWord.end)
             ic.setComposingText(text, 1)
             ic.finishComposingText()
             _lastCommitPosition.handleCommit(newContent.selection)
