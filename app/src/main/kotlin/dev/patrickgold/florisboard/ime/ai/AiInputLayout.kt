@@ -47,6 +47,7 @@ import dev.patrickgold.florisboard.ime.clipboard.provider.ItemType
 import dev.patrickgold.florisboard.ime.keyboard.FlorisImeSizing
 import dev.patrickgold.florisboard.ime.theme.FlorisImeUi
 import dev.patrickgold.florisboard.keyboardManager
+import org.florisboard.lib.android.showShortToastSync
 import org.florisboard.lib.snygg.ui.SnyggBox
 import org.florisboard.lib.snygg.ui.SnyggColumn
 import org.florisboard.lib.snygg.ui.SnyggIcon
@@ -54,15 +55,43 @@ import org.florisboard.lib.snygg.ui.SnyggIconButton
 import org.florisboard.lib.snygg.ui.SnyggRow
 import org.florisboard.lib.snygg.ui.SnyggText
 
-private enum class AiAction(val icon: String, val label: String) {
-    Accept("👍", "Согласиться"),
-    Decline("👎", "Отказать"),
-    Clarify("❓", "Уточнить"),
+private enum class AiIntent(
+    val icon: String,
+    val label: String,
+    val promptInstruction: String,
+) {
+    Accept(
+        icon = "👍",
+        label = "Согласиться",
+        promptInstruction = "Agree with the message and continue the conversation constructively.",
+    ),
+    Decline(
+        icon = "👎",
+        label = "Отказать",
+        promptInstruction = "Politely decline the request and keep the reply respectful.",
+    ),
+    Clarify(
+        icon = "❓",
+        label = "Уточнить",
+        promptInstruction = "Ask a clear follow-up question to clarify the missing details.",
+    ),
 }
 
-private enum class AiStyle(val icon: String, val label: String) {
-    Friendly("🙂", "Дружелюбно"),
-    Formal("💼", "Формально"),
+private enum class AiTone(
+    val icon: String,
+    val label: String,
+    val promptInstruction: String,
+) {
+    Friendly(
+        icon = "🙂",
+        label = "Дружелюбно",
+        promptInstruction = "Use a warm, friendly, natural tone.",
+    ),
+    Formal(
+        icon = "💼",
+        label = "Формально",
+        promptInstruction = "Use a concise, professional, formal tone.",
+    ),
 }
 
 @Composable
@@ -77,8 +106,15 @@ fun AiInputLayout(
             item.type == ItemType.TEXT && !item.isSensitive && !item.text.isNullOrBlank()
         }?.displayText(context)
     }
-    var selectedAction by remember { mutableStateOf(AiAction.Accept) }
-    var selectedStyle by remember { mutableStateOf(AiStyle.Friendly) }
+    var selectedIntent by remember { mutableStateOf(AiIntent.Accept) }
+    var selectedTone by remember { mutableStateOf(AiTone.Friendly) }
+    val aiPrompt = remember(lastClipboardText, selectedIntent, selectedTone) {
+        buildAiSuggestionPrompt(
+            sourceText = lastClipboardText,
+            intent = selectedIntent,
+            tone = selectedTone,
+        )
+    }
 
     SnyggColumn(
         elementName = FlorisImeUi.ClipboardContent.elementName,
@@ -88,10 +124,10 @@ fun AiInputLayout(
             .padding(8.dp),
     ) {
         AiControlsRow(
-            selectedAction = selectedAction,
-            onSelectAction = { selectedAction = it },
-            selectedStyle = selectedStyle,
-            onSelectStyle = { selectedStyle = it },
+            selectedIntent = selectedIntent,
+            onSelectIntent = { selectedIntent = it },
+            selectedTone = selectedTone,
+            onSelectTone = { selectedTone = it },
         )
         Spacer(modifier = Modifier.height(8.dp))
         Column(
@@ -101,8 +137,16 @@ fun AiInputLayout(
                 .verticalScroll(rememberScrollState()),
         ) {
             SelectionCard(
-                action = selectedAction,
-                style = selectedStyle,
+                intent = selectedIntent,
+                tone = selectedTone,
+                onCopyPrompt = {
+                    clipboardManager.addNewPlaintext(aiPrompt)
+                    context.showShortToastSync("Prompt скопирован")
+                },
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            PromptCard(
+                prompt = aiPrompt,
             )
             Spacer(modifier = Modifier.height(8.dp))
             LastClipboardCard(
@@ -114,10 +158,10 @@ fun AiInputLayout(
 
 @Composable
 private fun AiControlsRow(
-    selectedAction: AiAction,
-    onSelectAction: (AiAction) -> Unit,
-    selectedStyle: AiStyle,
-    onSelectStyle: (AiStyle) -> Unit,
+    selectedIntent: AiIntent,
+    onSelectIntent: (AiIntent) -> Unit,
+    selectedTone: AiTone,
+    onSelectTone: (AiTone) -> Unit,
 ) {
     val context = LocalContext.current
     val keyboardManager by context.keyboardManager()
@@ -139,19 +183,19 @@ private fun AiControlsRow(
             SnyggIcon(imageVector = Icons.AutoMirrored.Filled.ArrowBack)
         }
         Spacer(modifier = Modifier.width(4.dp))
-        AiAction.entries.forEach { action ->
+        AiIntent.entries.forEach { intent ->
             AiToggleButton(
-                text = action.icon,
-                selected = action == selectedAction,
-                onClick = { onSelectAction(action) },
+                text = intent.icon,
+                selected = intent == selectedIntent,
+                onClick = { onSelectIntent(intent) },
             )
         }
         Separator()
-        AiStyle.entries.forEach { style ->
+        AiTone.entries.forEach { tone ->
             AiToggleButton(
-                text = style.icon,
-                selected = style == selectedStyle,
-                onClick = { onSelectStyle(style) },
+                text = tone.icon,
+                selected = tone == selectedTone,
+                onClick = { onSelectTone(tone) },
             )
         }
     }
@@ -159,8 +203,9 @@ private fun AiControlsRow(
 
 @Composable
 private fun SelectionCard(
-    action: AiAction,
-    style: AiStyle,
+    intent: AiIntent,
+    tone: AiTone,
+    onCopyPrompt: () -> Unit,
 ) {
     SnyggBox(
         elementName = FlorisImeUi.ClipboardItem.elementName,
@@ -178,13 +223,41 @@ private fun SelectionCard(
             AiToggleButton(
                 text = "🔄",
                 selected = false,
-                onClick = { },
+                onClick = onCopyPrompt,
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 modifier = Modifier.weight(1f),
-                text = "Выбрано: ${action.icon} ${action.label} / ${style.icon} ${style.label}",
+                text = "AI Suggestions: ${intent.icon} ${intent.label} / ${tone.icon} ${tone.label}",
             )
+        }
+    }
+}
+
+@Composable
+private fun PromptCard(
+    prompt: String,
+    modifier: Modifier = Modifier,
+) {
+    SnyggBox(
+        elementName = FlorisImeUi.ClipboardItem.elementName,
+        attributes = mapOf("type" to "text"),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+        ) {
+            SnyggRow(verticalAlignment = Alignment.CenterVertically) {
+                SnyggIcon(
+                    modifier = Modifier.padding(end = 8.dp),
+                    imageVector = Icons.Default.AutoAwesome,
+                )
+                SnyggText(text = "Prompt для ChatGPT")
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(text = prompt)
         }
     }
 }
@@ -244,4 +317,30 @@ private fun AiToggleButton(
             text = text,
         )
     }
+}
+
+private fun buildAiSuggestionPrompt(
+    sourceText: String?,
+    intent: AiIntent,
+    tone: AiTone,
+): String {
+    val normalizedSourceText = sourceText?.trim().orEmpty()
+    return buildString {
+        appendLine("You are an assistant that drafts AI Suggestions for a keyboard.")
+        appendLine()
+        appendLine("Generate the default reply only.")
+        appendLine("Intent: ${intent.promptInstruction}")
+        appendLine("Tone: ${tone.promptInstruction}")
+        appendLine()
+        appendLine("Rules:")
+        appendLine("- Reply in the same language as the source text.")
+        appendLine("- Output only the final message text, without explanations, quotes, markdown, or variants.")
+        appendLine("- Keep the answer concise and ready to send.")
+        appendLine("- Preserve the meaning of the source text and do not invent facts.")
+        appendLine()
+        appendLine("Source text:")
+        appendLine("\"\"\"")
+        appendLine(normalizedSourceText.ifBlank { "No source text is available." })
+        appendLine("\"\"\"")
+    }.trim()
 }
