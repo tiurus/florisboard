@@ -64,6 +64,21 @@ data class QuickActionArrangement(
         )
     }
 
+    fun withMissingDefaultActions(): QuickActionArrangement {
+        val aiAction = QuickAction.InsertKey(TextKeyData.IME_UI_MODE_AI)
+        if (aiAction in this) {
+            return this
+        }
+        val clipboardAction = QuickAction.InsertKey(TextKeyData.IME_UI_MODE_CLIPBOARD)
+        val index = dynamicActions.indexOf(clipboardAction)
+        val newDynamicActions = if (index >= 0) {
+            dynamicActions.toMutableList().also { it.add(index + 1, aiAction) }
+        } else {
+            dynamicActions + aiAction
+        }
+        return copy(dynamicActions = newDynamicActions).distinct()
+    }
+
     companion object {
         val Default = QuickActionArrangement(
             stickyAction = QuickAction.InsertKey(TextKeyData.VOICE_INPUT),
@@ -74,6 +89,7 @@ data class QuickActionArrangement(
                 QuickAction.InsertKey(TextKeyData.TOGGLE_FLOATING_WINDOW),
                 QuickAction.InsertKey(TextKeyData.TOGGLE_RESIZE_MODE),
                 QuickAction.InsertKey(TextKeyData.IME_UI_MODE_CLIPBOARD),
+                QuickAction.InsertKey(TextKeyData.IME_UI_MODE_AI),
                 QuickAction.InsertKey(TextKeyData.IME_UI_MODE_MEDIA),
                 QuickAction.InsertKey(TextKeyData.TOGGLE_COMPACT_LAYOUT),
                 QuickAction.InsertKey(TextKeyData.TOGGLE_AUTOCORRECT),
@@ -102,7 +118,8 @@ data class QuickActionArrangement(
         }
 
         override fun deserialize(value: String): QuickActionArrangement {
-            return QuickActionJsonConfig.decodeFromString(value)
+            return QuickActionJsonConfig.decodeFromString<QuickActionArrangement>(value)
+                .withMissingDefaultActions()
         }
     }
 }

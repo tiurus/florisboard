@@ -77,6 +77,8 @@
     <string name="quick_action__forward_delete" comment="Please mind the limited available space for the quick action strings">Forward delete</string>
     <string name="quick_action__ime_ui_mode_clipboard" comment="Please mind the limited available space for the quick action strings">Clipboard</string>
     <string name="quick_action__ime_ui_mode_clipboard__tooltip">Open clipboard history</string>
+    <string name="quick_action__ime_ui_mode_ai" comment="Please mind the limited available space for the quick action strings">AI</string>
+    <string name="quick_action__ime_ui_mode_ai__tooltip">Open AI clipboard context</string>
     <string name="quick_action__ime_ui_mode_media" comment="Please mind the limited available space for the quick action strings">Emoji</string>
     <string name="quick_action__ime_ui_mode_media__tooltip">Open emoji panel</string>
     <string name="quick_action__language_switch" comment="Please mind the limited available space for the quick action strings">Switch language</string>
@@ -695,6 +697,9 @@
     <string name="clipboard__disabled__enable_button">Enable clipboard history</string>
     <string name="clipboard__empty__title">Your clipboard is empty</string>
     <string name="clipboard__empty__message">Once you copy text clips or images they will show up here.</string>
+    <string name="ai__header_title">AI context</string>
+    <string name="ai__empty__title">No recent messages</string>
+    <string name="ai__empty__message">Recent copied text messages will show up here.</string>
     <string name="clipboard__locked__title">Your clipboard is locked</string>
     <string name="clipboard__locked__message">To access your clipboard history, please first unlock your device.</string>
     <string name="clipboard__group_pinned">Pinned</string>

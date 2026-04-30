@@ -371,7 +371,8 @@ class FlorisImeService : LifecycleInputMethodService() {
         if (info == null) return
         val editorInfo = FlorisEditorInfo.wrap(info)
         activeState.batchEdit {
-            if (activeState.imeUiMode != ImeUiMode.CLIPBOARD || prefs.clipboard.historyHideOnNextTextField.get()) {
+            if (activeState.imeUiMode !in listOf(ImeUiMode.CLIPBOARD, ImeUiMode.AI) ||
+                prefs.clipboard.historyHideOnNextTextField.get()) {
                 activeState.imeUiMode = ImeUiMode.TEXT
             }
             activeState.isSelectionMode = editorInfo.initialSelection.isSelectionMode
