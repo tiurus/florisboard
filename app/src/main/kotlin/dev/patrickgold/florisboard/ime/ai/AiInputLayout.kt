@@ -36,17 +36,20 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.patrickgold.florisboard.clipboardManager
+import dev.patrickgold.florisboard.editorInstance
 import dev.patrickgold.florisboard.ime.ImeUiMode
 import dev.patrickgold.florisboard.ime.clipboard.provider.ItemType
 import dev.patrickgold.florisboard.ime.keyboard.FlorisImeSizing
 import dev.patrickgold.florisboard.ime.theme.FlorisImeUi
 import dev.patrickgold.florisboard.keyboardManager
+import kotlinx.coroutines.launch
 import org.florisboard.lib.android.showShortToastSync
 import org.florisboard.lib.snygg.ui.SnyggBox
 import org.florisboard.lib.snygg.ui.SnyggColumn
@@ -94,12 +97,21 @@ private enum class AiTone(
     ),
 }
 
+private sealed interface AiSuggestionState {
+    data object Idle : AiSuggestionState
+    data object Loading : AiSuggestionState
+    data class Success(val text: String) : AiSuggestionState
+    data class Error(val message: String) : AiSuggestionState
+}
+
 @Composable
 fun AiInputLayout(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val clipboardManager by context.clipboardManager()
+    val editorInstance by context.editorInstance()
+    val coroutineScope = rememberCoroutineScope()
     val history by clipboardManager.historyFlow.collectAsState()
     val lastClipboardText = remember(history) {
         history.all.firstOrNull { item ->
@@ -115,6 +127,7 @@ fun AiInputLayout(
             tone = selectedTone,
         )
     }
+    var suggestionState by remember { mutableStateOf<AiSuggestionState>(AiSuggestionState.Idle) }
 
     SnyggColumn(
         elementName = FlorisImeUi.ClipboardContent.elementName,
@@ -139,14 +152,44 @@ fun AiInputLayout(
             SelectionCard(
                 intent = selectedIntent,
                 tone = selectedTone,
-                onCopyPrompt = {
-                    clipboardManager.addNewPlaintext(aiPrompt)
-                    context.showShortToastSync("Prompt скопирован")
+                isLoading = suggestionState == AiSuggestionState.Loading,
+                onGenerate = {
+                    if (lastClipboardText.isNullOrBlank()) {
+                        suggestionState = AiSuggestionState.Error("Нет текста, для которого можно сгенерировать ответ")
+                        return@SelectionCard
+                    }
+                    suggestionState = AiSuggestionState.Loading
+                    coroutineScope.launch {
+                        val result = OpenAiSuggestionClient.generateDefaultReply(aiPrompt)
+                        suggestionState = result.fold(
+                            onSuccess = { AiSuggestionState.Success(it) },
+                            onFailure = { error ->
+                                AiSuggestionState.Error(error.localizedMessage ?: "Не удалось получить ответ")
+                            },
+                        )
+                    }
+                },
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            SuggestionCard(
+                state = suggestionState,
+                onCopySuggestion = { text ->
+                    clipboardManager.addNewPlaintext(text)
+                    context.showShortToastSync("Ответ скопирован")
+                },
+                onPasteSuggestion = { text ->
+                    if (!editorInstance.commitText(text)) {
+                        context.showShortToastSync("Не удалось вставить ответ")
+                    }
                 },
             )
             Spacer(modifier = Modifier.height(8.dp))
             PromptCard(
                 prompt = aiPrompt,
+                onCopyPrompt = {
+                    clipboardManager.addNewPlaintext(aiPrompt)
+                    context.showShortToastSync("Prompt скопирован")
+                },
             )
             Spacer(modifier = Modifier.height(8.dp))
             LastClipboardCard(
@@ -205,7 +248,8 @@ private fun AiControlsRow(
 private fun SelectionCard(
     intent: AiIntent,
     tone: AiTone,
-    onCopyPrompt: () -> Unit,
+    isLoading: Boolean,
+    onGenerate: () -> Unit,
 ) {
     SnyggBox(
         elementName = FlorisImeUi.ClipboardItem.elementName,
@@ -221,9 +265,9 @@ private fun SelectionCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             AiToggleButton(
-                text = "🔄",
+                text = if (isLoading) "…" else "🔄",
                 selected = false,
-                onClick = onCopyPrompt,
+                onClick = onGenerate,
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
@@ -235,8 +279,10 @@ private fun SelectionCard(
 }
 
 @Composable
-private fun PromptCard(
-    prompt: String,
+private fun SuggestionCard(
+    state: AiSuggestionState,
+    onCopySuggestion: (String) -> Unit,
+    onPasteSuggestion: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     SnyggBox(
@@ -254,6 +300,58 @@ private fun PromptCard(
                     modifier = Modifier.padding(end = 8.dp),
                     imageVector = Icons.Default.AutoAwesome,
                 )
+                SnyggText(text = "Default answer")
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            when (state) {
+                AiSuggestionState.Idle -> Text(text = "Нажми 🔄, чтобы сгенерировать ответ")
+                AiSuggestionState.Loading -> Text(text = "Генерирую ответ…")
+                is AiSuggestionState.Error -> Text(text = state.message)
+                is AiSuggestionState.Success -> {
+                    Text(text = state.text)
+                    Spacer(modifier = Modifier.height(10.dp))
+                    SnyggRow(verticalAlignment = Alignment.CenterVertically) {
+                        AiToggleButton(
+                            text = "↵",
+                            selected = false,
+                            onClick = { onPasteSuggestion(state.text) },
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        AiToggleButton(
+                            text = "📋",
+                            selected = false,
+                            onClick = { onCopySuggestion(state.text) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PromptCard(
+    prompt: String,
+    onCopyPrompt: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SnyggBox(
+        elementName = FlorisImeUi.ClipboardItem.elementName,
+        attributes = mapOf("type" to "text"),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+        ) {
+            SnyggRow(verticalAlignment = Alignment.CenterVertically) {
+                AiToggleButton(
+                    text = "📋",
+                    selected = false,
+                    onClick = onCopyPrompt,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
                 SnyggText(text = "Prompt для ChatGPT")
             }
             Spacer(modifier = Modifier.height(10.dp))

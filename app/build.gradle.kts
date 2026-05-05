@@ -33,6 +33,11 @@ val projectTargetSdk: String by project
 val projectCompileSdk: String by project
 val projectVersionCode: String by project
 val projectVersionName: String by project
+val openAiApiKey = providers.gradleProperty("openAiApiKey")
+    .orElse(providers.environmentVariable("OPENAI_API_KEY"))
+    .orElse("")
+val openAiModel = providers.gradleProperty("openAiModel")
+    .orElse("gpt-5-mini")
 val projectVersionNameSuffix = projectVersionName.substringAfter("-", "").let { suffix ->
     if (suffix.isNotEmpty()) {
         "-$suffix"
@@ -78,6 +83,8 @@ configure<ApplicationExtension> {
         buildConfigField("String", "BUILD_COMMIT_HASH", "\"${getGitCommitHash().get()}\"")
         buildConfigField("String", "FLADDONS_API_VERSION", "\"v~draft2\"")
         buildConfigField("String", "FLADDONS_STORE_URL", "\"beta.addons.florisboard.org\"")
+        buildConfigField("String", "OPENAI_API_KEY", "\"${openAiApiKey.get()}\"")
+        buildConfigField("String", "OPENAI_MODEL", "\"${openAiModel.get()}\"")
 
         sourceSets {
             maybeCreate("main").apply {
